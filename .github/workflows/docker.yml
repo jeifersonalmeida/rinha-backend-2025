@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: jeiferson/rinha-backend-2025
 
 jobs:
   build-and-push:
