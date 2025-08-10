@@ -1,0 +1,27 @@
+FROM arm64v8/golang:1.23-alpine AS builder
+
+WORKDIR /app
+
+# Compilar para Linux/ARM64 sem CGO
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=arm64
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Binário enxuto
+RUN go build -trimpath -ldflags="-s -w" -o /out/main .
+
+# Runtime ARM64
+FROM arm64v8/alpine:3.20
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+
+COPY --from=builder /out/main ./main
+
+EXPOSE 8080
+
+CMD ["./main"]
