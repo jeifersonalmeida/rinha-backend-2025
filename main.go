@@ -65,6 +65,8 @@ func main() {
 		return c.SendStatus(fiber.StatusCreated)
 	})
 	app.Get("/payments-summary", func(c *fiber.Ctx) error {
+		fmt.Printf("[%s][SUMMARY-REQUEST] Receving a summary request...\n", time.Now().UTC().Format(time.RFC3339))
+
 		fromStr := c.Query("from")
 		toStr := c.Query("to")
 		internal := c.Query("internal", "false")
