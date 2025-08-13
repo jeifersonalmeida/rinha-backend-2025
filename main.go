@@ -65,25 +65,33 @@ func main() {
 		return c.SendStatus(fiber.StatusCreated)
 	})
 	app.Get("/payments-summary", func(c *fiber.Ctx) error {
-		fmt.Printf("[%s][SUMMARY-REQUEST] Receving a summary request...\n", time.Now().UTC().Format(time.RFC3339))
+		fmt.Printf("[%s][SUMMARY-REQUEST] Recebendo uma summary request...\n", time.Now().UTC().Format(time.RFC3339))
 
 		fromStr := c.Query("from")
 		toStr := c.Query("to")
 		internal := c.Query("internal", "false")
 
-		from, err := time.Parse(time.RFC3339, fromStr)
-		if err != nil {
-			return c.SendStatus(fiber.StatusBadRequest)
+		var from, to time.Time
+		var err error
+		useDateFilter := false
+
+		if fromStr != "" && toStr != "" {
+			from, err = time.Parse(time.RFC3339, fromStr)
+			if err != nil {
+				return c.SendStatus(fiber.StatusBadRequest)
+			}
+
+			to, err = time.Parse(time.RFC3339, toStr)
+			if err != nil {
+				return c.SendStatus(fiber.StatusBadRequest)
+			}
+
+			useDateFilter = true
 		}
 
-		to, err := time.Parse(time.RFC3339, toStr)
-		if err != nil {
-			return c.SendStatus(fiber.StatusBadRequest)
-		}
-
-		defCount, defTotal, fbCount, fbTotal := getPaymentSummary(from, to)
+		defCount, defTotal, fbCount, fbTotal := getPaymentSummary(from, to, useDateFilter)
 		if internal != "true" {
-			defCountIntern, defTotalIntern, fbCountIntern, fbTotalIntern := fetchPaymentSummary(from, to)
+			defCountIntern, defTotalIntern, fbCountIntern, fbTotalIntern := fetchPaymentSummary(from, to, useDateFilter)
 			defCount += defCountIntern
 			defTotal += defTotalIntern
 			fbCount += fbCountIntern
@@ -105,27 +113,31 @@ func main() {
 	log.Fatal(app.Listen(":8080"))
 }
 
-func getPaymentSummary(from, to time.Time) (defaultCount int, defaultAmount float64, fallbackCount int, fallbackAmount float64) {
+func getPaymentSummary(from, to time.Time, useDateFilter bool) (
+	defaultCount int, defaultAmount float64, fallbackCount int, fallbackAmount float64) {
 	storageMutex.RLock()
 	defer storageMutex.RUnlock()
 
 	for _, p := range storage {
-		if (p.RequestedAt.Equal(from) || p.RequestedAt.After(from)) &&
-			(p.RequestedAt.Before(to) || p.RequestedAt.Equal(to)) {
-			if p.Fallback {
-				fallbackCount++
-				fallbackAmount += p.Amount
-			} else {
-				defaultCount++
-				defaultAmount += p.Amount
+		if useDateFilter {
+			if p.RequestedAt.Before(from) || p.RequestedAt.After(to) {
+				continue
 			}
+		}
+
+		if p.Fallback {
+			fallbackCount++
+			fallbackAmount += p.Amount
+		} else {
+			defaultCount++
+			defaultAmount += p.Amount
 		}
 	}
 
 	return
 }
 
-func fetchPaymentSummary(from, to time.Time) (defCount int, defTotal float64, fbCount int, fbTotal float64) {
+func fetchPaymentSummary(from, to time.Time, useDateFilter bool) (defCount int, defTotal float64, fbCount int, fbTotal float64) {
 	baseURL := slaveURL
 	if !isMaster {
 		baseURL = masterURL
@@ -137,8 +149,10 @@ func fetchPaymentSummary(from, to time.Time) (defCount int, defTotal float64, fb
 	}
 
 	q := endpoint.Query()
-	q.Set("from", from.Format("2006-01-02T15:04:05.000Z"))
-	q.Set("to", to.Format("2006-01-02T15:04:05.000Z"))
+	if useDateFilter {
+		q.Set("from", from.Format(time.RFC3339))
+		q.Set("to", to.Format(time.RFC3339))
+	}
 	q.Set("internal", "true")
 	endpoint.RawQuery = q.Encode()
 
