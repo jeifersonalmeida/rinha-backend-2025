@@ -60,13 +60,11 @@ func main() {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 		}
 
-		paymentRequest.RequestedAt = time.Now()
+		paymentRequest.RequestedAt = time.Now().UTC()
 		queue <- &paymentRequest
 		return c.SendStatus(fiber.StatusCreated)
 	})
 	app.Get("/payments-summary", func(c *fiber.Ctx) error {
-		fmt.Printf("[%s][SUMMARY-REQUEST] Recebendo uma summary request...\n", time.Now().UTC().Format(time.RFC3339))
-
 		fromStr := c.Query("from")
 		toStr := c.Query("to")
 		internal := c.Query("internal", "false")
@@ -76,12 +74,12 @@ func main() {
 		useDateFilter := false
 
 		if fromStr != "" && toStr != "" {
-			from, err = time.Parse(time.RFC3339, fromStr)
+			from, err = time.Parse("2006-01-02T15:04:05.000Z", fromStr)
 			if err != nil {
 				return c.SendStatus(fiber.StatusBadRequest)
 			}
 
-			to, err = time.Parse(time.RFC3339, toStr)
+			to, err = time.Parse("2006-01-02T15:04:05.000Z", toStr)
 			if err != nil {
 				return c.SendStatus(fiber.StatusBadRequest)
 			}
@@ -150,8 +148,8 @@ func fetchPaymentSummary(from, to time.Time, useDateFilter bool) (defCount int, 
 
 	q := endpoint.Query()
 	if useDateFilter {
-		q.Set("from", from.Format(time.RFC3339))
-		q.Set("to", to.Format(time.RFC3339))
+		q.Set("from", from.Format("2006-01-02T15:04:05.000Z"))
+		q.Set("to", to.Format("2006-01-02T15:04:05.000Z"))
 	}
 	q.Set("internal", "true")
 	endpoint.RawQuery = q.Encode()

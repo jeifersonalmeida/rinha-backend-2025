@@ -32,8 +32,9 @@ func worker() {
 		}
 		targetURL += "/payments"
 
-		payload, _ := json.Marshal(p)
-		payloadBuffer := bytes.NewBuffer(payload)
+		p.RequestedAt = p.RequestedAt.Truncate(time.Millisecond)
+		marshaled, _ := json.Marshal(p)
+		payloadBuffer := bytes.NewBuffer(marshaled)
 		req, _ := http.NewRequest("POST", targetURL, payloadBuffer)
 		req.Header.Set("Content-Type", "application/json")
 
