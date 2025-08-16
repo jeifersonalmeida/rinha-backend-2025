@@ -22,59 +22,63 @@ func worker() {
 		status := atomic.LoadInt32(&circuitStatusFlag)
 
 		if status == 2 {
+			queue <- p
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
-		targetURL := primaryURL
-		if status == 1 {
-			targetURL = fallbackURL
-		}
-		targetURL += "/payments"
-
-		p.RequestedAt = p.RequestedAt.Truncate(time.Millisecond)
-		marshaled, _ := json.Marshal(p)
-		payloadBuffer := bytes.NewBuffer(marshaled)
-		req, _ := http.NewRequest("POST", targetURL, payloadBuffer)
-		req.Header.Set("Content-Type", "application/json")
-
-		start := time.Now()
-		resp, err := workerClient.Do(req)
-		duration := time.Since(start).Milliseconds()
-
-		if resp != nil {
-			resp.Body.Close()
-		}
-
-		if isMaster {
-			metricsChan <- Metric{
-				Primary:    status != 2,
-				DurationMs: duration,
-				Failed:     err != nil,
-			}
-		}
-
-		if err != nil && status != 1 {
-			fallbackReq, _ := http.NewRequest("POST", fallbackURL+"/payments", payloadBuffer)
-			fallbackReq.Header.Set("Content-Type", "application/json")
-			if fbResp, fbErr := workerClient.Do(fallbackReq); fbErr == nil && fbResp != nil {
-				fbResp.Body.Close()
+		success := tryProcessPayment(p, status)
+		if !success && status == 0 {
+			fallbackSuccess := tryProcessPayment(p, 1)
+			if fallbackSuccess {
 				p.Fallback = true
+				saveChan <- *p
 			} else {
-				if isMaster {
-					metricsChan <- Metric{
-						Primary:    false,
-						DurationMs: 1000,
-						Failed:     true,
-					}
-				}
 				queue <- p
-				continue
 			}
+		} else if success {
+			saveChan <- *p
+		} else {
+			queue <- p
 		}
-
-		saveChan <- *p
 	}
+}
+
+func tryProcessPayment(p *PaymentRequest, circuitStatus int32) bool {
+	targetURL := primaryURL
+	if circuitStatus == 1 {
+		targetURL = fallbackURL
+	}
+
+	p.RequestedAt = time.Now().UTC().Truncate(time.Millisecond)
+	marshaled, _ := json.Marshal(p)
+	req, _ := http.NewRequest("POST", targetURL+"/payments", bytes.NewBuffer(marshaled))
+	req.Header.Set("Content-Type", "application/json")
+
+	start := time.Now()
+	resp, err := workerClient.Do(req)
+	duration := time.Since(start).Milliseconds()
+
+	if isMaster {
+		metricsChan <- Metric{
+			Primary:    circuitStatus == 0,
+			DurationMs: duration,
+			Failed:     err != nil || (resp != nil && resp.StatusCode != 200),
+		}
+	}
+
+	if err != nil {
+		return false
+	}
+
+	if resp != nil {
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return false
+		}
+	}
+
+	return true
 }
 
 func startInMemorySaver() {

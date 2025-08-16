@@ -1,6 +1,25 @@
 version: '3.8'
 
 services:
+#  customlb:
+#    build: ./load-balancer
+#    container_name: customlb
+#    environment:
+#      - BACKENDS=http://api-1:8080,http://api-2:8080,http://api-3:8080
+#    ports:
+#      - "9999:9999"
+#    depends_on:
+#      - api-1
+#      - api-2
+#      - api-3
+#    networks:
+#      - rinha-network
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "0.3"
+#          memory: "80MB"
+
   haproxy:
     image: haproxy:2.6
     container_name: haproxy
@@ -11,20 +30,21 @@ services:
     depends_on:
       - api-1
       - api-2
+      - api-3
     networks:
       - rinha-network
     deploy:
       resources:
         limits:
           cpus: "0.3"
-          memory: "100MB"
+          memory: "80MB"
 
   api-1:
     build: .
     container_name: api-1
     environment:
       - MASTER=true
-      - NUM_WORKERS=20
+      - NUM_WORKERS=15
       - MAX_DEFAULT_LATENCY=30
       - USE_FALLBACK=true
       - MAX_FALLBACK_LATENCY=30
@@ -38,23 +58,38 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.6"
-          memory: "150MB"
+          cpus: "0.4"
+          memory: "90MB"
 
   api-2:
     build: .
     container_name: api-2
     environment:
       - MASTER=false
-      - NUM_WORKERS=20
+      - NUM_WORKERS=15
     networks:
       - rinha-network
       - payment-processor
     deploy:
       resources:
         limits:
-          cpus: "0.6"
-          memory: "150MB"
+          cpus: "0.4"
+          memory: "90MB"
+
+  api-3:
+    build: .
+    container_name: api-3
+    environment:
+      - MASTER=false
+      - NUM_WORKERS=15
+    networks:
+      - rinha-network
+      - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: "90MB"
 
 networks:
   rinha-network:

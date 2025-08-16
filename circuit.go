@@ -29,7 +29,7 @@ var (
 	fallbackURL = "http://payment-processor-fallback:8080"
 
 	masterURL = "http://api-1:8080"
-	slaveURL  = "http://api-2:8080"
+	slavesURL = []string{"http://api-2:8080", "http://api-3:8080"}
 
 	circuitStatusFlag int32 // 0 = principal, 1 = fallback, 2 = aberto
 
@@ -158,8 +158,11 @@ func circuitController() {
 			}
 
 			if atomic.LoadInt32(&circuitStatusFlag) != int32(status) {
-				go notifySlave(status)
+				go notifySlave(status, slavesURL[0])
+				go notifySlave(status, slavesURL[1])
 				atomic.StoreInt32(&circuitStatusFlag, int32(status))
+				fmt.Printf("[%s][CIRCUIT-STATUS] Switching circuit to %d\n",
+					getUTCNowFormatted(), status)
 			}
 		}
 	}
@@ -179,8 +182,8 @@ func p95(values []int64) int64 {
 	return cp[rank]
 }
 
-func notifySlave(status int) {
-	url := fmt.Sprintf("%s/circuit/%d", slaveURL, status)
+func notifySlave(status int, slaveUrl string) {
+	url := fmt.Sprintf("%s/circuit/%d", slaveUrl, status)
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		fmt.Println("Erro ao criar requisição:", err)

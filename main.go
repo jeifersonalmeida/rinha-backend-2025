@@ -60,9 +60,41 @@ func main() {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 		}
 
-		paymentRequest.RequestedAt = time.Now().UTC()
 		queue <- &paymentRequest
 		return c.SendStatus(fiber.StatusCreated)
+	})
+	app.Get("/payments-summary-random", func(c *fiber.Ctx) error {
+		fromStr := c.Query("from")
+		toStr := c.Query("to")
+
+		from, err := time.Parse("2006-01-02T15:04:05.000Z", fromStr)
+		if err != nil {
+			return c.SendStatus(fiber.StatusBadRequest)
+		}
+
+		to, err := time.Parse("2006-01-02T15:04:05.000Z", toStr)
+		if err != nil {
+			return c.SendStatus(fiber.StatusBadRequest)
+		}
+
+		var ids []string
+		for _, p := range storage {
+			if p.RequestedAt.Before(from) || p.RequestedAt.After(to) {
+				continue
+			}
+			ids = append(ids, p.CorrelationID)
+		}
+		return c.Status(fiber.StatusOK).JSON(ids)
+	})
+	app.Get("/payments/:id", func(c *fiber.Ctx) error {
+		id := c.Params("id")
+
+		for _, paymentRequest := range storage {
+			if paymentRequest.CorrelationID == id {
+				return c.Status(fiber.StatusOK).JSON(paymentRequest)
+			}
+		}
+		return c.SendStatus(fiber.StatusNotFound)
 	})
 	app.Get("/payments-summary", func(c *fiber.Ctx) error {
 		fromStr := c.Query("from")
@@ -87,13 +119,25 @@ func main() {
 			useDateFilter = true
 		}
 
-		defCount, defTotal, fbCount, fbTotal := getPaymentSummary(from, to, useDateFilter)
-		if internal != "true" {
-			defCountIntern, defTotalIntern, fbCountIntern, fbTotalIntern := fetchPaymentSummary(from, to, useDateFilter)
-			defCount += defCountIntern
-			defTotal += defTotalIntern
-			fbCount += fbCountIntern
-			fbTotal += fbTotalIntern
+		fmt.Printf("[%s][SUMMARY-REQUEST] Receiving request with from: %v and %v\n",
+			getUTCNowFormatted(), formatDate(from), formatDate(to))
+
+		var defCount, fbCount int
+		var defTotal, fbTotal float64
+
+		if !isMaster && internal != "true" {
+			defCount, defTotal, fbCount, fbTotal = fetchPaymentSummary(from, to, useDateFilter, false, masterURL)
+		} else {
+			defCount, defTotal, fbCount, fbTotal = getPaymentSummary(from, to, useDateFilter)
+			if internal != "true" {
+				for _, slaveURL := range slavesURL {
+					defCountIntern, defTotalIntern, fbCountIntern, fbTotalIntern := fetchPaymentSummary(from, to, useDateFilter, true, slaveURL)
+					defCount += defCountIntern
+					defTotal += defTotalIntern
+					fbCount += fbCountIntern
+					fbTotal += fbTotalIntern
+				}
+			}
 		}
 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
@@ -135,12 +179,8 @@ func getPaymentSummary(from, to time.Time, useDateFilter bool) (
 	return
 }
 
-func fetchPaymentSummary(from, to time.Time, useDateFilter bool) (defCount int, defTotal float64, fbCount int, fbTotal float64) {
-	baseURL := slaveURL
-	if !isMaster {
-		baseURL = masterURL
-	}
-	endpoint, err := url.Parse(baseURL + "/payments-summary")
+func fetchPaymentSummary(from, to time.Time, useDateFilter, internal bool, baseUrl string) (defCount int, defTotal float64, fbCount int, fbTotal float64) {
+	endpoint, err := url.Parse(baseUrl + "/payments-summary")
 	if err != nil {
 		fmt.Println(fmt.Errorf("erro ao montar URL: %w", err))
 		return 0, 0, 0, 0
@@ -151,7 +191,9 @@ func fetchPaymentSummary(from, to time.Time, useDateFilter bool) (defCount int, 
 		q.Set("from", from.Format("2006-01-02T15:04:05.000Z"))
 		q.Set("to", to.Format("2006-01-02T15:04:05.000Z"))
 	}
-	q.Set("internal", "true")
+	if internal {
+		q.Set("internal", "true")
+	}
 	endpoint.RawQuery = q.Encode()
 
 	resp, err := circuitClient.Get(endpoint.String())
@@ -184,4 +226,12 @@ func fetchPaymentSummary(from, to time.Time, useDateFilter bool) (defCount int, 
 
 	return parsed.Default.TotalRequests, parsed.Default.TotalAmount,
 		parsed.Fallback.TotalRequests, parsed.Fallback.TotalAmount
+}
+
+func getUTCNowFormatted() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+func formatDate(time time.Time) string {
+	return time.Format("2006-01-02T15:04:05.000Z")
 }
